@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lightweight Translator</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", "PingFang SC", sans-serif;
+      background: radial-gradient(circle at 20% 20%, #0b1224, #0a0f1d 50%), var(--bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: min(1100px, 100%);
+      background: rgba(30, 41, 59, 0.85);
+      border: 1px solid #334155;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+      padding: 20px;
+      backdrop-filter: blur(8px);
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    header h1 { margin: 0; font-size: 24px; }
+    header .desc { color: var(--muted); font-size: 14px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+    }
+    .pane {
+      background: #0b1724;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    label { font-size: 13px; color: var(--muted); }
+    textarea {
+      width: 100%;
+      min-height: 180px;
+      resize: vertical;
+      border-radius: 10px;
+      border: 1px solid #1e293b;
+      background: #0f172a;
+      color: var(--text);
+      padding: 12px;
+      font-size: 15px;
+      outline: none;
+    }
+    select, input, button {
+      border-radius: 10px;
+      border: 1px solid #1e293b;
+      background: #0f172a;
+      color: var(--text);
+      padding: 10px;
+      font-size: 14px;
+      outline: none;
+    }
+    button {
+      cursor: pointer;
+      background: linear-gradient(135deg, #38bdf8, #3b82f6);
+      color: #0b1224;
+      font-weight: 600;
+      border: none;
+      transition: transform 0.08s ease, box-shadow 0.08s ease;
+    }
+    button:active { transform: translateY(1px); }
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .status {
+      font-size: 13px;
+      color: var(--muted);
+      min-height: 18px;
+    }
+    .small {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    code { background: #0f172a; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <header>
+      <div>
+        <h1>Lightweight Translator</h1>
+        <div class="desc">Multiple translation APIs with automatic fallback support</div>
+      </div>
+      <button id="swap">⇄ Swap Languages</button>
+    </header>
+
+    <div class="grid">
+      <div class="pane">
+        <label>Source Language</label>
+        <select id="from"></select>
+        <label>Text to Translate</label>
+        <textarea id="source" placeholder="Enter text to translate..."></textarea>
+        <div class="row">
+          <button id="translate">Translate</button>
+          <button id="clear">Clear</button>
+          <span class="status" id="status"></span>
+        </div>
+      </div>
+      <div class="pane">
+        <label>Target Language</label>
+        <select id="to"></select>
+        <label>Translation Result</label>
+        <textarea id="result" readonly></textarea>
+      </div>
+    </div>
+
+    <div class="pane" style="margin-top:16px;">
+      <label>Translation Service</label>
+      <select id="apiSelect" style="margin-bottom:8px;">
+        <option value="google">Google Translate (Recommended, Most Stable)</option>
+        <option value="mymemory">MyMemory Translation (Free)</option>
+        <option value="lingvanex">Lingvanex (Free, CORS Supported)</option>
+        <option value="libretranslate">LibreTranslate (Public API)</option>
+        <option value="corsproxy">Use CORS Proxy (Fix 403)</option>
+        <option value="custom">Custom API</option>
+      </select>
+      <div id="customApiPanel" style="display:none;">
+        <div class="row">
+          <input id="endpoint" style="flex:1;" placeholder="API Endpoint">
+          <input id="apiKey" style="flex:1;" placeholder="API Key (if required)">
+        </div>
+      </div>
+      <div class="small">
+        <strong>Recommended: Google Translate</strong> (most stable, rarely encounters 403 errors).<br>
+        If you encounter 403 errors, the system will automatically try other backup APIs.<br>
+        If all APIs are unavailable, detailed error information will be displayed.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const languages = [
+      { code: 'auto', name: 'Auto Detect' },
+      { code: 'en', name: 'English' },
+      { code: 'zh', name: 'Chinese' },
+      { code: 'ja', name: 'Japanese' },
+      { code: 'ko', name: 'Korean' },
+      { code: 'fr', name: 'French' },
+      { code: 'es', name: 'Spanish' },
+      { code: 'de', name: 'German' },
+      { code: 'ru', name: 'Russian' },
+    ];
+
+    const $ = (sel) => document.querySelector(sel);
+    const fromSel = $('#from');
+    const toSel = $('#to');
+    const srcInput = $('#source');
+    const dstInput = $('#result');
+    const statusEl = $('#status');
+    const apiSelect = $('#apiSelect');
+    const endpointInput = $('#endpoint');
+    const keyInput = $('#apiKey');
+    const customApiPanel = $('#customApiPanel');
+
+    function initSelects() {
+      fromSel.innerHTML = languages.map(opt => `<option value="${opt.code}">${opt.name}</option>`).join('');
+      toSel.innerHTML = languages.filter(l => l.code !== 'auto').map(opt => `<option value="${opt.code}">${opt.name}</option>`).join('');
+      fromSel.value = 'auto';
+      toSel.value = 'en';
+    }
+
+    async function translateWithMyMemory(text, from, to) {
+      const langPair = `${from === 'auto' ? 'en' : from}|${to}`;
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langPair}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.responseStatus !== 200) throw new Error(data.responseStatus);
+      return data.responseData.translatedText;
+    }
+
+    async function translateWithLingvanex(text, from, to) {
+      // Lingvanex free API with CORS support
+      const langMap = { 'en': 'en_US', 'zh': 'zh_CN', 'ja': 'ja_JP', 'ko': 'ko_KR', 
+                        'fr': 'fr_FR', 'es': 'es_ES', 'de': 'de_DE', 'ru': 'ru_RU' };
+      const fromLang = langMap[from === 'auto' ? 'en' : from] || 'en_US';
+      const toLang = langMap[to] || 'en_US';
+      
+      const url = `https://api-b2b.backenster.com/b1/api/v3/translate`;
+      const body = {
+        from: fromLang,
+        to: toLang,
+        data: text,
+        platform: 'api'
+      };
+      
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+      
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return data.result || data.translatedText;
+    }
+
+    async function translateWithGoogle(text, from, to) {
+      // Use Google Translate web API (via public service)
+      const langMap = {
+        'auto': 'auto', 'en': 'en', 'zh': 'zh-CN', 'ja': 'ja', 'ko': 'ko',
+        'fr': 'fr', 'es': 'es', 'de': 'de', 'ru': 'ru'
+      };
+      const fromLang = langMap[from] || 'auto';
+      const toLang = langMap[to] || 'en';
+      
+      // Method 1: Use Google Translate public API (via proxy)
+      try {
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${fromLang}&tl=${toLang}&dt=t&q=${encodeURIComponent(text)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data && data[0] && data[0][0] && data[0][0][0]) {
+          return data[0].map(item => item[0]).join('');
+        }
+        throw new Error('Parse failed');
+      } catch (err) {
+        // Method 2: Use backup Google Translate API
+        const altUrl = `https://translate.google.com/translate_a/single?client=gtx&sl=${fromLang}&tl=${toLang}&dt=t&q=${encodeURIComponent(text)}`;
+        const res = await fetch(altUrl);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data && data[0] && data[0][0] && data[0][0][0]) {
+          return data[0].map(item => item[0]).join('');
+        }
+        throw new Error('Google Translate API unavailable');
+      }
+    }
+
+    async function translateWithCorsProxy(text, from, to) {
+      // Try multiple CORS proxy services to access translation API
+      const targetUrl = 'https://libretranslate.de/translate';
+      const body = {
+        q: text,
+        source: from === 'auto' ? 'en' : from,
+        target: to,
+        format: 'text',
+      };
+      
+      // Try multiple proxy services
+      const proxies = [
+        'https://api.allorigins.win/raw?url=',
+        'https://corsproxy.io/?',
+        'https://thingproxy.freeboard.io/fetch/',
+      ];
+      
+      for (const proxy of proxies) {
+        try {
+          const url = proxy + encodeURIComponent(targetUrl);
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const result = data.translatedText || data.translation || data.result;
+            if (result) return result;
+          }
+        } catch (err) {
+          console.warn(`Proxy ${proxy} failed:`, err);
+        }
+      }
+      
+      // If all proxies fail, try direct call (may work in some cases)
+      throw new Error('All CORS proxies unavailable');
+    }
+
+    async function translateWithLibreTranslate(text, from, to) {
+      const endpoint = 'https://libretranslate.de/translate';
+      const body = {
+        q: text,
+        source: from === 'auto' ? 'en' : from,
+        target: to,
+        format: 'text',
+      };
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return data.translatedText || data.translation || data.result;
+    }
+
+    async function translateWithCustom(text, from, to) {
+      const endpoint = endpointInput.value.trim();
+      if (!endpoint) throw new Error('Please enter custom API endpoint');
+      const body = {
+        q: text,
+        source: from === 'auto' ? 'en' : from,
+        target: to,
+        format: 'text',
+      };
+      if (keyInput.value.trim()) body.api_key = keyInput.value.trim();
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return data.translatedText || data.translation || data.result;
+    }
+
+    async function translate() {
+      const text = srcInput.value.trim();
+      if (!text) {
+        setStatus('Please enter text to translate');
+        return;
+      }
+      
+      const from = fromSel.value;
+      const to = toSel.value;
+      const apiType = apiSelect.value;
+      
+      setStatus('Translating...');
+      
+      let translated = null;
+      let lastError = null;
+      
+      // Try multiple APIs (by priority)
+      const apis = [];
+      if (apiType === 'google') {
+        apis.push(() => translateWithGoogle(text, from, to));
+        apis.push(() => translateWithMyMemory(text, from, to));
+        apis.push(() => translateWithLingvanex(text, from, to));
+      } else if (apiType === 'mymemory') {
+        apis.push(() => translateWithMyMemory(text, from, to));
+        apis.push(() => translateWithGoogle(text, from, to));
+        apis.push(() => translateWithLingvanex(text, from, to));
+      } else if (apiType === 'lingvanex') {
+        apis.push(() => translateWithLingvanex(text, from, to));
+        apis.push(() => translateWithGoogle(text, from, to));
+        apis.push(() => translateWithMyMemory(text, from, to));
+      } else if (apiType === 'corsproxy') {
+        apis.push(() => translateWithCorsProxy(text, from, to));
+        apis.push(() => translateWithGoogle(text, from, to));
+        apis.push(() => translateWithLingvanex(text, from, to));
+        apis.push(() => translateWithMyMemory(text, from, to));
+      } else if (apiType === 'libretranslate') {
+        apis.push(() => translateWithLibreTranslate(text, from, to));
+        apis.push(() => translateWithGoogle(text, from, to));
+        apis.push(() => translateWithLingvanex(text, from, to));
+        apis.push(() => translateWithMyMemory(text, from, to));
+      } else {
+        apis.push(() => translateWithCustom(text, from, to));
+        apis.push(() => translateWithGoogle(text, from, to));
+        apis.push(() => translateWithLingvanex(text, from, to));
+        apis.push(() => translateWithMyMemory(text, from, to));
+      }
+      
+      for (const apiFunc of apis) {
+        try {
+          translated = await apiFunc();
+          break;
+        } catch (err) {
+          lastError = err;
+          console.warn('API call failed:', err);
+        }
+      }
+      
+      if (translated) {
+        dstInput.value = translated;
+        setStatus('Translation successful');
+      } else {
+        const errorMsg = lastError?.message || 'Unknown error';
+        const is403 = errorMsg.includes('403') || errorMsg.includes('Forbidden');
+        const isCors = errorMsg.includes('CORS') || errorMsg.includes('cors');
+        
+        let suggestion = '';
+        if (is403 || isCors) {
+          suggestion = `\n\n🔧 Solutions for 403/CORS errors:\n1. Try different translation services (recommend Google Translate)\n2. If using file:// protocol, use a local server instead\n3. Install browser CORS extension (e.g., CORS Unblock)\n4. Use custom API with CORS proxy configuration`;
+        } else {
+          suggestion = `\n\nSuggestions:\n1. Check network connection\n2. Try switching to other translation services\n3. Retry later`;
+        }
+        
+        dstInput.value = `⚠️ Translation service temporarily unavailable\n\nError: ${errorMsg}${suggestion}`;
+        setStatus('Translation failed - ' + errorMsg);
+      }
+    }
+
+    function swapLang() {
+      const prevFrom = fromSel.value;
+      fromSel.value = toSel.value === 'auto' ? 'en' : toSel.value;
+      toSel.value = prevFrom === 'auto' ? 'en' : prevFrom;
+    }
+
+    function clearAll() {
+      srcInput.value = '';
+      dstInput.value = '';
+      setStatus('');
+      srcInput.focus();
+    }
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+    }
+
+    apiSelect.addEventListener('change', () => {
+      customApiPanel.style.display = apiSelect.value === 'custom' ? 'block' : 'none';
+    });
+
+    $('#translate').addEventListener('click', translate);
+    $('#clear').addEventListener('click', clearAll);
+    $('#swap').addEventListener('click', swapLang);
+
+    srcInput.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'enter') {
+        translate();
+      }
+    });
+
+    initSelects();
+    setStatus('Ready - Recommended: Google Translate (most stable)');
+  </script>
+</body>
+</html>
+
